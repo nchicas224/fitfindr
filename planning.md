@@ -213,8 +213,20 @@ flowchart TD
      before trusting it" is a plan. -->
 
 **Milestone 3 — Individual tool implementations:**
+I will use ChatGPT/Codex to help implement and review each individual tool in `tools.py`. For each tool, I will give the AI the matching tool section from this `planning.md`, the function stub from `tools.py`, and any relevant data schema from `listings.json` or `wardrobe_schema.json`.
+
+For `search_listings`, I will give the AI the Tool 1 spec and ask it to implement filtering by `max_price`, optional size matching with size normalization, keyword relevance scoring, and sorting by score. I expect it to produce a deterministic Python implementation that uses `load_listings()` and returns `list[dict]`. I will verify it with at least three manual tests: a query with expected matches, a query with a size filter, and a no-results query.
+
+For `suggest_outfit`, I will give the AI the Tool 2 spec, the wardrobe schema, and examples of a selected listing and wardrobe. I expect it to produce an LLM prompt and Groq API call that returns a non-empty string with 1-2 outfit suggestions. I will verify it once with the example wardrobe and once with the empty wardrobe to confirm it gives generalized styling advice instead of failing.
+
+For `create_fit_card`, I will give the AI the Tool 3 spec and examples of an outfit suggestion and selected listing. I expect it to produce an LLM prompt and Groq API call that returns a casual 2-4 sentence caption mentioning the item name, price, and platform. I will verify that it handles missing or empty outfit input gracefully and that a normal response sounds like a usable social caption.
 
 **Milestone 4 — Planning loop and state management:**
+I will use ChatGPT/Codex to help implement `run_agent()` in `agent.py` using the Planning Loop, State Management section, Error Handling table, and Architecture diagram from this file. I will ask it to keep the implementation aligned with the existing session keys: `query`, `parsed`, `search_results`, `selected_item`, `wardrobe`, `outfit_suggestion`, `fit_card`, and `error`.
+
+I expect it to produce a planning loop that initializes the session, parses the user's natural language query into `description`, `size`, and `max_price`, calls the tools in order, stores each result in session state, and returns early with `session["error"]` if a required step fails. I will verify the result with the CLI examples in `agent.py`: a happy-path graphic tee query and the deliberate no-results query.
+
+After `run_agent()` works, I will use ChatGPT/Codex to help implement `handle_query()` in `app.py`. I will give it the `app.py` TODO comments and the final session structure from `agent.py`. I expect it to select the correct wardrobe, call `run_agent()`, format the selected listing for the UI, and return the listing text, outfit suggestion, and fit card. I will verify it by running the Gradio app and trying both the example wardrobe and empty wardrobe paths.
 
 ---
 
