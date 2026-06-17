@@ -152,16 +152,50 @@ For each tool, describe the specific failure mode you're handling and what the a
 
 ## Architecture
 
-<!-- Draw a diagram of your agent showing how the components connect:
-     User input → Planning Loop → Tools (search_listings, suggest_outfit, create_fit_card)
-                                                                          ↕
-                                                                   State / Session
-     Show what triggers each tool, how state flows between them, and where error paths branch off.
-     Use ASCII art or a Mermaid diagram (https://mermaid.js.org/syntax/flowchart.html).
-     Do NOT embed an image — graders need to read your diagram directly in the file;
-     an embedded image or screenshot cannot be evaluated.
-     You'll share this diagram with an AI tool when asking it to implement
-     the planning loop and each individual tool. -->
+```mermaid
+flowchart TD
+    A[User query + wardrobe choice] --> B[app.py handle_query]
+    B --> C[Select example or empty wardrobe]
+    C --> D[run_agent]
+
+    D --> E[Create session dict]
+    E --> F[Normalize and strip user query]
+    F --> G[LLM parses query into description, size, max_price]
+    G --> H[Store parsed values in session parsed]
+
+    H --> I[search_listings]
+    I --> J[Normalize parsed size and listing sizes]
+    J --> K[Filter by size and max_price]
+    K --> L[Score listings by description relevance]
+    L --> M{Any matching listings?}
+
+    M -- No --> N[Set session error]
+    N --> O[Return session early]
+
+    M -- Yes --> P[Store results in session search_results]
+    P --> Q[Select top result]
+    Q --> R[Store item in session selected_item]
+
+    R --> S{Wardrobe has items?}
+    S -- Yes --> T[suggest_outfit with selected item + wardrobe pieces]
+    S -- No --> U[suggest_outfit with selected item + general styling prompt]
+    T --> V{Outfit string returned?}
+    U --> V
+
+    V -- No --> W[Set session error]
+    W --> O
+
+    V -- Yes --> X[Store string in session outfit_suggestion]
+    X --> Y[create_fit_card]
+    Y --> Z{Caption returned?}
+
+    Z -- No --> AA[Set session error]
+    AA --> O
+
+    Z -- Yes --> AB[Store caption in session fit_card]
+    AB --> AC[Return completed session]
+    AC --> AD[app.py formats listing, outfit, and fit card for UI]
+```
 
 ---
 
