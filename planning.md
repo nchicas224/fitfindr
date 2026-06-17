@@ -238,12 +238,101 @@ Write out what a full user interaction looks like from start to finish — tool 
 
 **Step 1:**
 <!-- What does the agent do first? Which tool is called? With what input? -->
+The user submits the query through `app.py`, using the example wardrobe. `handle_query()` selects the example wardrobe and calls `run_agent(query, wardrobe)`.
+
+Inside `run_agent()`, the agent creates a new session, strips the user query, and asks the LLM to parse the query into structured values. The expected parsed result is:
+
+```python
+{
+    "description": "vintage graphic tee",
+    "size": None,
+    "max_price": 30.0,
+}
+```
+
+The agent stores this in `session["parsed"]`.
 
 **Step 2:**
 <!-- What happens next? What was returned from step 1? What tool is called now? -->
+The agent calls:
+
+```python
+search_listings(
+    description="vintage graphic tee",
+    size=None,
+    max_price=30.0,
+)
+```
+
+`search_listings` loads `listings.json`, skips size filtering because `size` is None, filters out listings over $30, scores the remaining listings by keyword relevance, and returns a sorted list of matching listing dictionaries.
+
+One likely top result is:
+
+```python
+{
+    "id": "lst_006",
+    "title": "Graphic Tee - 2003 Tour Bootleg Style",
+    "category": "tops",
+    "size": "L",
+    "price": 24.00,
+    "platform": "depop",
+}
+```
+
+The agent stores the full returned list in `session["search_results"]` and stores the top result in `session["selected_item"]`.
 
 **Step 3:**
 <!-- Continue until the full interaction is complete -->
+The agent calls:
+
+```python
+suggest_outfit(
+    new_item=session["selected_item"],
+    wardrobe=session["wardrobe"],
+)
+```
+
+Because the example wardrobe has saved items, `suggest_outfit` asks the LLM to build 1-2 outfits using the selected graphic tee and named wardrobe pieces. A possible returned outfit suggestion is:
+
+```text
+Style the bootleg graphic tee with the baggy straight-leg dark wash jeans, chunky white sneakers, and the vintage black denim jacket. Add the black crossbody bag to keep the outfit casual, streetwear-inspired, and easy to wear.
+```
+
+The agent stores this in `session["outfit_suggestion"]`.
+
+Next, the agent calls:
+
+```python
+create_fit_card(
+    outfit=session["outfit_suggestion"],
+    new_item=session["selected_item"],
+)
+```
+
+`create_fit_card` asks the LLM to turn the outfit into a short social caption that mentions the item name, price, and platform. The agent stores the returned caption in `session["fit_card"]` and returns the completed session.
 
 **Final output to user:**
 <!-- What does the user actually see at the end? -->
+The app displays three panels:
+
+Top listing found:
+
+```text
+Graphic Tee - 2003 Tour Bootleg Style
+$24.00 on depop
+Size: L
+Condition: good
+Vintage-style bootleg tee with faded graphic. Slightly boxy fit. 100% cotton, soft and worn-in.
+```
+
+Outfit idea:
+
+```text
+Style the bootleg graphic tee with the baggy straight-leg dark wash jeans, chunky white sneakers, and the vintage black denim jacket. Add the black crossbody bag to keep the outfit casual, streetwear-inspired, and easy to wear.
+```
+
+Fit card:
+
+```text
+Found this Graphic Tee - 2003 Tour Bootleg Style on depop for $24 and it has that perfectly worn-in bootleg feel. I'd wear it with baggy dark denim, chunky white sneakers, and a black denim jacket for an easy vintage streetwear fit. Casual, a little faded, and very weekend-ready.
+```
