@@ -16,37 +16,62 @@ You must have at least 3 tools. The three required tools are listed — add any 
 
 **What it does:**
 <!-- Describe what this tool does in 1–2 sentences -->
+This function will take the description, (Optional) the size, and (Optional) the maximum price from the users query and filter the listings.json for the input params. It will then sort the found listings by relevance to the parsed query values. Finally, it will return a list of dictionaries corresponding to the relevant listings found.
 
 **Input parameters:**
 <!-- List each parameter, its type, and what it represents -->
-- `description` (str): ...
-- `size` (str): ...
-- `max_price` (float): ...
+- `description` (str): The brief or full description of the clothing item the user is looking for.
+- `size` (str | None): The optional parameter for the user's size.
+- `max_price` (float | None): The optional parameter for the threshold price of a listing.
 
 **What it returns:**
 <!-- Describe the return value — what fields does a result contain? -->
+The function will return a list of dictionaries. The dictionaries are sorted by relevancy in most to least order.
+To ensure our data retains schema, the happy path for the function will return:
+- list[dict]
+
+Each dictionary item contains:
+- `id` (str)
+- `title` (str)
+- `description` (str)
+- `category` (str)
+- `style_tags` (list[str])
+- `size` (str)
+- `condition` (str)
+- `price` (float)
+- `colors` (list[str])
+- `brand` (str | None)
+- `platform` (str)
 
 **What happens if it fails or returns nothing:**
 <!-- What should the agent do if no listings match? -->
+If this function fails, it should exit early and return the contracted structure of:
+- results = []
 
+The orchestrator agent will recognize this result by checking if results are empty storing a helpful message in session['error'], stop the workflow before calling suggest_outfit, and call the LLM for a response to the user.
 ---
 
 ### Tool 2: suggest_outfit
 
 **What it does:**
 <!-- Describe what this tool does in 1–2 sentences -->
+This tool will take in a `new_item` from the relevancy list and the user's wardrobe which may be empty. The function will prompt an LLM with these inputs as context and a dedicated system prompt which instructs the LLM to create one or two outfits from the context.
 
 **Input parameters:**
 <!-- List each parameter, its type, and what it represents -->
-- `new_item` (dict): ...
-- `wardrobe` (dict): ...
+- `new_item` (dict): A dictionary representing the item selected from `listings`.
+- `wardrobe` (dict | None): The wardrobe schema dictionary that represents the user's current clothing items. 
 
 **What it returns:**
 <!-- Describe the return value -->
+The function will return a result from the LLM model which describes one or two suggested outfits as a tuple of strings.
 
 **What happens if it fails or returns nothing:**
 <!-- What should the agent do if the wardrobe is empty or no outfit can be suggested? -->
+- If no wardrobe is given to the function, the function should set session['error'] to a string containing a helpful message for the agent and return early.
+- If no outfit can be suggested, the function should set session['error'] to describe the error and return early.
 
+The agent will then check for these edge cases before continuing to call create_fit_card. If the cases are present, the agent will make a final call to the LLM with the context and errors to return a useful response to the user.
 ---
 
 ### Tool 3: create_fit_card
