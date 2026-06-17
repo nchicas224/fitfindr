@@ -142,9 +142,11 @@ For each tool, describe the specific failure mode you're handling and what the a
 
 | Tool | Failure mode | Agent response |
 |------|-------------|----------------|
-| search_listings | No results match the query | |
-| suggest_outfit | Wardrobe is empty | |
-| create_fit_card | Outfit input is missing or incomplete | |
+| search_listings | No results match the query | Store a helpful message in `session["error"]`, stop the workflow, and return the session before calling `suggest_outfit`. |
+| suggest_outfit | Wardrobe is empty | Treat this as a supported alternate path, not a failure. The tool asks the LLM for general styling advice instead of wardrobe-specific outfit combinations, and the agent stores the returned string in `session["outfit_suggestion"]`. |
+| suggest_outfit | LLM call fails or returns an empty response | Return an empty string from the tool. The agent checks for an empty result, stores a helpful message in `session["error"]`, stops the workflow, and returns the session before calling `create_fit_card`. |
+| create_fit_card | Outfit input is missing or incomplete | Return a descriptive error string instead of raising an exception. The agent checks whether the result is empty before storing it in `session["fit_card"]`. |
+| create_fit_card | New item input is missing or missing required fields | Return a descriptive error string instead of raising an exception. The agent stores the result if non-empty or sets `session["error"]` if no usable caption is returned. |
 
 ---
 
