@@ -13,6 +13,7 @@ Tools:
 """
 
 import os
+import re
 
 from dotenv import load_dotenv
 from groq import Groq
@@ -20,6 +21,29 @@ from groq import Groq
 from utils.data_loader import load_listings
 
 load_dotenv()
+
+
+_SIZE_WORDS = {
+    "small": "s",
+    "medium": "m",
+    "large": "l",
+    "extra large": "xl",
+    "x large": "xl",
+    "x-large": "xl",
+}
+
+_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "for",
+    "in",
+    "of",
+    "the",
+    "to",
+    "under",
+    "with",
+}
 
 
 # ── Groq client ───────────────────────────────────────────────────────────────
@@ -32,6 +56,112 @@ def _get_groq_client():
             "GROQ_API_KEY not set. Add it to a .env file in the project root."
         )
     return Groq(api_key=api_key)
+
+
+def _normalize_size(value: str | None) -> str | None:
+    """Normalize user/listing size strings while preserving meaningful symbols."""
+    if value is None:
+        return None
+
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return None
+
+    normalized = re.sub(r"\bsize\b", " ", normalized)
+    for phrase, replacement in _SIZE_WORDS.items():
+        normalized = re.sub(rf"\b{re.escape(phrase)}\b", replacement, normalized)
+    normalized = re.sub(r"[^a-z0-9./ ]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized or None
+
+
+def _size_tokens(value: str) -> set[str]:
+    """Tokenize sizes while keeping combined values like w30 and l30 intact."""
+    return set(re.findall(r"[a-z]+\d+(?:\.\d+)?|[a-z]+|\d+(?:\.\d+)?", value))
+
+
+def _size_matches(query_size: str | None, listing_size: str | None) -> bool:
+    """Return True when a parsed size should match a listing size."""
+    normalized_query = _normalize_size(query_size)
+    if normalized_query is None:
+        return True
+
+    normalized_listing = _normalize_size(listing_size)
+    if normalized_listing is None:
+        return False
+
+    if normalized_query == normalized_listing:
+        return True
+
+    query_tokens = _size_tokens(normalized_query)
+    listing_tokens = _size_tokens(normalized_listing)
+    return bool(query_tokens and query_tokens.issubset(listing_tokens))
+
+
+def _description_tokens(value: str) -> set[str]:
+    tokens = set(re.findall(r"[a-z0-9]+", value.lower()))
+    return {token for token in tokens if token not in _STOPWORDS}
+
+
+def _listing_search_text(listing: dict) -> str:
+    style_tags = " ".join(listing.get("style_tags", []))
+    colors = " ".join(listing.get("colors", []))
+    return " ".join(
+        str(part)
+        for part in [
+            listing.get("title", ""),
+            listing.get("description", ""),
+            listing.get("category", ""),
+            style_tags,
+            colors,
+            listing.get("brand") or "",
+        ]
+    )
+
+
+def _score_listing(query: str, query_tokens: set[str], listing: dict) -> int:
+    title_tokens = _description_tokens(listing.get("title", ""))
+    tag_tokens = _description_tokens(" ".join(listing.get("style_tags", [])))
+    body_tokens = _description_tokens(
+        " ".join(
+            str(part)
+            for part in [
+                listing.get("description", ""),
+                listing.get("category", ""),
+                " ".join(listing.get("colors", [])),
+                listing.get("brand") or "",
+            ]
+        )
+    )
+
+    score = 0
+    score += 3 * len(query_tokens & title_tokens)
+    score += 2 * len(query_tokens & tag_tokens)
+    score += len(query_tokens & body_tokens)
+
+    normalized_query = " ".join(sorted(query_tokens))
+    title_text = " ".join(sorted(title_tokens))
+    tag_text = " ".join(sorted(tag_tokens))
+    if normalized_query and normalized_query in title_text:
+        score += 5
+    if normalized_query and normalized_query in tag_text:
+        score += 4
+
+    phrase = " ".join(re.findall(r"[a-z0-9]+", query.lower()))
+    title_raw = listing.get("title", "").lower()
+    combined_text = _listing_search_text(listing).lower()
+    if phrase and phrase in combined_text:
+        score += 6
+
+    query_words = re.findall(r"[a-z0-9]+", query.lower())
+    for first, second in zip(query_words, query_words[1:]):
+        adjacent_phrase = f"{first} {second}"
+        if adjacent_phrase in title_raw:
+            score += 12
+        if adjacent_phrase in combined_text:
+            score += 4
+
+    return score
 
 
 # ── Tool 1: search_listings ───────────────────────────────────────────────────
@@ -69,8 +199,26 @@ def search_listings(
 
     Before writing code, fill in the Tool 1 section of planning.md.
     """
-    # Replace this with your implementation
-    return []
+    query_tokens = _description_tokens(description or "")
+    if not query_tokens:
+        return []
+
+    scored_listings = []
+    for listing in load_listings():
+        if max_price is not None and float(listing.get("price", 0)) > max_price:
+            continue
+
+        if not _size_matches(size, listing.get("size")):
+            continue
+
+        score = _score_listing(description or "", query_tokens, listing)
+        if score == 0:
+            continue
+
+        scored_listings.append((score, listing))
+
+    scored_listings.sort(key=lambda item: (-item[0], item[1].get("price", 0)))
+    return [listing for _, listing in scored_listings]
 
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
