@@ -18,7 +18,16 @@ Usage (once implemented):
     print(result["error"])   # None on success
 """
 
-from tools import search_listings, suggest_outfit, create_fit_card
+import json
+import re
+
+from tools import (
+    LLM_MODEL,
+    _get_groq_client,
+    search_listings,
+    suggest_outfit,
+    create_fit_card,
+)
 
 
 # ── session state ─────────────────────────────────────────────────────────────
@@ -42,7 +51,94 @@ def _new_session(query: str, wardrobe: dict) -> dict:
         "outfit_suggestion": None,   # string returned by suggest_outfit
         "fit_card": None,            # string returned by create_fit_card
         "error": None,               # set if the interaction ended early
+        "wardrobe_empty": not bool(wardrobe.get("items", [])) if isinstance(wardrobe, dict) else True,
     }
+
+
+def _fallback_parse_query(query: str) -> dict:
+    """Extract basic search params if the LLM parser is unavailable."""
+    max_price = None
+    price_match = re.search(r"(?:under|below|less than|up to)?\s*\$?\s*(\d+(?:\.\d+)?)", query, re.I)
+    if price_match and any(marker in query.lower() for marker in ["$", "under", "below", "less than", "up to"]):
+        max_price = float(price_match.group(1))
+
+    size = None
+    size_match = re.search(
+        r"\b(?:size\s*)?(one size|us\s*\d+(?:\.\d+)?|w\d+(?:\s*l\d+)?|s/m|m/l|l/xl|xxs|xs|s|m|l|xl|xxl)\b",
+        query,
+        re.I,
+    )
+    if size_match:
+        size = size_match.group(1).strip()
+
+    description = query
+    description = re.sub(r"(?:under|below|less than|up to)\s*\$?\s*\d+(?:\.\d+)?", " ", description, flags=re.I)
+    description = re.sub(r"\bsize\s+", " ", description, flags=re.I)
+    if size:
+        description = re.sub(re.escape(size), " ", description, flags=re.I)
+    description = re.sub(r"\$?\d+(?:\.\d+)?", " ", description)
+    description = re.sub(r"\s+", " ", description).strip(" ,.")
+
+    return {
+        "description": description or query.strip(),
+        "size": size,
+        "max_price": max_price,
+    }
+
+
+def _coerce_parsed_query(parsed: dict, original_query: str) -> dict:
+    description = str(parsed.get("description") or original_query).strip()
+    size = parsed.get("size")
+    if isinstance(size, str):
+        size = size.strip() or None
+    elif size is not None:
+        size = str(size).strip() or None
+
+    max_price = parsed.get("max_price")
+    if max_price in ("", None):
+        max_price = None
+    else:
+        try:
+            max_price = float(max_price)
+        except (TypeError, ValueError):
+            max_price = None
+
+    return {
+        "description": description,
+        "size": size,
+        "max_price": max_price,
+    }
+
+
+def _parse_query_with_llm(query: str) -> dict:
+    prompt = (
+        "Parse this thrift shopping query into JSON with exactly these keys: "
+        "description, size, max_price.\n"
+        "- description: the item/style keywords to search for, without price or size words.\n"
+        "- size: a string like M, US 8, W30 L30, S/M, or null if not provided.\n"
+        "- max_price: a number or null if not provided.\n\n"
+        f"Query: {query}\n\n"
+        "Return only valid JSON."
+    )
+
+    try:
+        client = _get_groq_client()
+        response = client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": "You extract structured search parameters from user queries."},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=150,
+            temperature=0,
+        )
+        text = (response.choices[0].message.content or "").strip()
+        parsed = json.loads(text)
+        if not isinstance(parsed, dict):
+            raise ValueError("Parsed query was not a JSON object.")
+        return _coerce_parsed_query(parsed, query)
+    except Exception:
+        return _fallback_parse_query(query)
 
 
 # ── planning loop ─────────────────────────────────────────────────────────────
@@ -92,9 +188,45 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     Before writing code, complete the Planning Loop and State Management sections
     of planning.md — your implementation should match what you described there.
     """
-    # TODO: implement the planning loop
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
+
+    cleaned_query = (query or "").strip()
+    session["query"] = cleaned_query
+    session["wardrobe"] = wardrobe
+
+    if not cleaned_query:
+        session["error"] = "Please enter a search query before looking for listings."
+        return session
+
+    parsed = _parse_query_with_llm(cleaned_query)
+    session["parsed"] = parsed
+
+    results = search_listings(
+        description=parsed["description"],
+        size=parsed.get("size"),
+        max_price=parsed.get("max_price"),
+    )
+    session["search_results"] = results
+
+    if not results:
+        session["error"] = "No listings matched your search. Try a broader description, different size, or higher price."
+        return session
+
+    selected_item = results[0]
+    session["selected_item"] = selected_item
+
+    outfit = suggest_outfit(selected_item, wardrobe)
+    if not outfit or not outfit.strip():
+        session["error"] = "I found a listing, but could not generate an outfit suggestion for it."
+        return session
+    session["outfit_suggestion"] = outfit
+
+    fit_card = create_fit_card(outfit, selected_item)
+    if not fit_card or not fit_card.strip():
+        session["error"] = "I found an outfit, but could not create a fit card for it."
+        return session
+    session["fit_card"] = fit_card
+
     return session
 
 
