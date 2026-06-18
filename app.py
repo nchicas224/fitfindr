@@ -20,6 +20,30 @@ from utils.data_loader import get_example_wardrobe, get_empty_wardrobe
 
 # ── query handler ─────────────────────────────────────────────────────────────
 
+def _format_listing_text(item: dict) -> str:
+    if not item:
+        return ""
+
+    colors = ", ".join(item.get("colors", [])) or "unknown"
+    style_tags = ", ".join(item.get("style_tags", [])) or "none"
+    brand = item.get("brand") or "unknown"
+
+    return "\n".join(
+        [
+            item.get("title", "Unknown listing"),
+            f"${item.get('price', 'unknown')} on {item.get('platform', 'unknown')}",
+            f"Size: {item.get('size', 'unknown')}",
+            f"Condition: {item.get('condition', 'unknown')}",
+            f"Category: {item.get('category', 'unknown')}",
+            f"Brand: {brand}",
+            f"Colors: {colors}",
+            f"Style tags: {style_tags}",
+            "",
+            item.get("description", ""),
+        ]
+    ).strip()
+
+
 def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
     """
     Called by Gradio when the user submits a query.
@@ -43,8 +67,25 @@ def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
            string and return it along with session["outfit_suggestion"] and
            session["fit_card"].
     """
-    # TODO: implement this function
-    return "Agent not yet implemented.", "", ""
+    cleaned_query = (user_query or "").strip()
+    if not cleaned_query:
+        return "Please enter a search query.", "", ""
+
+    if wardrobe_choice == "Empty wardrobe (new user)":
+        wardrobe = get_empty_wardrobe()
+    else:
+        wardrobe = get_example_wardrobe()
+
+    session = run_agent(cleaned_query, wardrobe)
+    if session.get("error"):
+        return session["error"], "", ""
+
+    listing_text = _format_listing_text(session.get("selected_item"))
+    return (
+        listing_text,
+        session.get("outfit_suggestion") or "",
+        session.get("fit_card") or "",
+    )
 
 
 # ── interface ─────────────────────────────────────────────────────────────────
