@@ -22,6 +22,8 @@ from utils.data_loader import load_listings
 
 load_dotenv()
 
+LLM_MODEL = os.environ.get("LLM_MODEL", "llama-3.3-70b-versatile")
+
 
 _SIZE_WORDS = {
     "small": "s",
@@ -117,6 +119,56 @@ def _listing_search_text(listing: dict) -> str:
             listing.get("brand") or "",
         ]
     )
+
+
+def _format_listing_for_prompt(listing: dict) -> str:
+    style_tags = ", ".join(listing.get("style_tags", [])) or "none"
+    colors = ", ".join(listing.get("colors", [])) or "unknown"
+    brand = listing.get("brand") or "unknown"
+    return "\n".join(
+        [
+            f"Title: {listing.get('title', 'Unknown item')}",
+            f"Description: {listing.get('description', '')}",
+            f"Category: {listing.get('category', 'unknown')}",
+            f"Style tags: {style_tags}",
+            f"Size: {listing.get('size', 'unknown')}",
+            f"Condition: {listing.get('condition', 'unknown')}",
+            f"Price: ${listing.get('price', 'unknown')}",
+            f"Colors: {colors}",
+            f"Brand: {brand}",
+            f"Platform: {listing.get('platform', 'unknown')}",
+        ]
+    )
+
+
+def _wardrobe_items(wardrobe: dict) -> list[dict]:
+    if not isinstance(wardrobe, dict):
+        return []
+    return wardrobe.get("items", [])
+
+
+def _format_wardrobe_for_prompt(wardrobe: dict) -> str:
+    items = _wardrobe_items(wardrobe)
+    if not items:
+        return "No saved wardrobe items."
+
+    formatted_items = []
+    for item in items:
+        colors = ", ".join(item.get("colors", [])) or "unknown"
+        style_tags = ", ".join(item.get("style_tags", [])) or "none"
+        notes = item.get("notes") or "none"
+        formatted_items.append(
+            "\n".join(
+                [
+                    f"- Name: {item.get('name', 'Unknown wardrobe item')}",
+                    f"  Category: {item.get('category', 'unknown')}",
+                    f"  Colors: {colors}",
+                    f"  Style tags: {style_tags}",
+                    f"  Notes: {notes}",
+                ]
+            )
+        )
+    return "\n".join(formatted_items)
 
 
 def _score_listing(query: str, query_tokens: set[str], listing: dict) -> int:
@@ -248,8 +300,52 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
 
     Before writing code, fill in the Tool 2 section of planning.md.
     """
-    # Replace this with your implementation
-    return ""
+    if not new_item:
+        return ""
+
+    wardrobe_items = _wardrobe_items(wardrobe)
+    if wardrobe_items:
+        system_prompt = (
+            "You are FitFindr, a practical personal stylist. Suggest 1-2 complete "
+            "outfits using the thrifted item and specific named pieces from the "
+            "user's wardrobe. Keep the response concise, concrete, and easy to wear."
+        )
+        user_prompt = (
+            "New thrifted item:\n"
+            f"{_format_listing_for_prompt(new_item)}\n\n"
+            "User wardrobe:\n"
+            f"{_format_wardrobe_for_prompt(wardrobe)}\n\n"
+            "Suggest 1-2 outfits. Mention the wardrobe pieces by name and explain "
+            "the overall vibe briefly."
+        )
+    else:
+        system_prompt = (
+            "You are FitFindr, a practical personal stylist. The user has no saved "
+            "wardrobe items, so provide general styling ideas instead of pretending "
+            "to use pieces from their closet."
+        )
+        user_prompt = (
+            "New thrifted item:\n"
+            f"{_format_listing_for_prompt(new_item)}\n\n"
+            "The user's wardrobe is empty. Start by briefly saying that no saved "
+            "wardrobe items were available, then suggest 1-2 general outfit ideas "
+            "for styling this item."
+        )
+
+    try:
+        client = _get_groq_client()
+        response = client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=300,
+            temperature=0.7,
+        )
+        return (response.choices[0].message.content or "").strip()
+    except Exception:
+        return ""
 
 
 # ── Tool 3: create_fit_card ───────────────────────────────────────────────────
