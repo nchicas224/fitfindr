@@ -377,5 +377,43 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
 
     Before writing code, fill in the Tool 3 section of planning.md.
     """
-    # Replace this with your implementation
-    return ""
+    if not outfit or not outfit.strip():
+        return "Could not create a fit card because the outfit suggestion is missing."
+
+    required_fields = ["title", "price", "platform"]
+    if not new_item or any(new_item.get(field) in (None, "") for field in required_fields):
+        return "Could not create a fit card because the selected item is missing required details."
+
+    system_prompt = (
+        "You are FitFindr, a casual styling assistant that writes short, "
+        "authentic social captions. Write like a real outfit post, not a sales ad."
+    )
+    user_prompt = (
+        "Create a 2-4 sentence Instagram/TikTok outfit caption.\n\n"
+        "Thrifted item:\n"
+        f"{_format_listing_for_prompt(new_item)}\n\n"
+        "Outfit suggestion:\n"
+        f"{outfit.strip()}\n\n"
+        "Requirements:\n"
+        "- Mention the item name naturally once.\n"
+        "- Mention the price naturally once.\n"
+        "- Mention the platform naturally once.\n"
+        "- Capture the outfit vibe with specific styling details.\n"
+        "- Keep it casual, authentic, and concise.\n"
+        "- Do not use hashtags unless they feel natural."
+    )
+
+    try:
+        client = _get_groq_client()
+        response = client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=220,
+            temperature=0.9,
+        )
+        return (response.choices[0].message.content or "").strip()
+    except Exception:
+        return ""
