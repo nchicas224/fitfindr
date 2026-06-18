@@ -9,6 +9,13 @@ __pycache__/
 venv/
 env/
 
+# Data
+*.pdf
+data/Show (Project)_ Week 2 - AI201 _ Applications of AI Engineering _ CodePath Courses.pdf
+
+# Local demo planning assets
+demo/
+
 # Jupyter
 .ipynb_checkpoints/
 
